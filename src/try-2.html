@@ -1,0 +1,465 @@
+<!doctype html>
+<meta charset="utf-8">
+
+<html>
+
+<head>
+    <title>数据可视化</title>
+    <script src="http://d3js.org/d3.v3.min.js"></script>
+</head>
+
+<body>
+
+    <div style="text-align:center">
+        <p id="info">请选择你要进行的操作！</p>
+        <button id="prim">找出最小生成树</button>
+        <button id="dijkstra">计算最短路径</button>
+        <p/>
+        <div><input id="t"/><button id="tb">计算给定阈值下的连通分量</button></div>
+        <p id="text">将鼠标放在点上显示具体信息</p>
+        <p id="text2">将鼠标放在边上显示具体信息</p>
+        <p>##节点颜色由评分决定：评分为7显示黄色，评分越高越绿，评分越低越红##</p>
+    </div>
+
+    <script>
+        var di = false;
+        var width = 1200,
+            height = 900;
+
+        var color = d3.scale.linear()
+            .domain([0, 7, 10])
+            .range(["red", "yellow", "green"]);
+
+        // 一个力学图
+        var force = d3.layout.force()
+            .charge(-9) // 电荷量
+            .linkDistance(60)
+            .size([width, height]);
+
+        // 准备画布，把他放在一个div里面，对div进行居中操作。
+        var svg, node;
+
+        let nodes = [], links = [], templink=[];
+
+        var dijchoose = false, chosenpointsnum = 0;
+        
+        // 读取文件，因为有些用户名里面是包含逗号的，但是肯定不可能在用户名或者电影之中包含一个Tab，所以就使用tsv（是Tab-separated values）格式。
+        d3.tsv("out.tsv", function(error, data) {
+            
+            temp = 0;
+            for (k in data[0]) {
+                    // 对他所有的属性进行遍历
+                    if (data[0].hasOwnProperty(k) && k != "ori")
+                    {
+                        name = k;
+                        var node = {"name":name, "score": parseFloat(data[0][k]), "num": temp, "links":[], "nexts":[]}
+                        nodes.push(node);
+                        temp++;
+                    }
+            }
+
+            var graph = [], g = [];
+
+            function setg(k) {
+                
+                graph[parseInt(k["source"])][parseInt(k["target"])] = parseInt(k["value"]);
+                    g[parseInt(k["source"])][parseInt(k["target"])] = parseInt(k["value"]);
+                
+            }
+
+            d3.tsv("value.tsv", function(error, data) {
+            
+                var pointsize = nodes.length;
+
+                for(var i = 0; i < pointsize; i++)
+                {
+                    graph.push([]);
+                    g.push([]);
+                    for(var j = 0; j < pointsize; j++)
+                    {
+                        graph[i].push(0);
+                        g[i].push(1000000);
+                    }
+                }
+                for (var temp = 0; temp < data.length; temp++) {
+                    k = data[temp]
+                    nodes[parseInt(k["source"])]["nexts"].push({"node":parseInt(k["target"]), "val":parseInt(k["value"])})
+                    setg(k)
+                }
+
+                function paintnow(pi = false) {
+
+                    di = pi;
+
+                    svg = d3.select("body").append("div").style("text-align", "center").append("svg")
+                        .attr("width", width)
+                        .attr("height", height);
+
+                    // 给force绑定上nodes和links，然后开始
+                    force
+                        .nodes(nodes)
+                        .links(links)
+                        .start();
+
+                    // 创建连边的图像，然后设置边的宽度为1
+                    var link = svg.selectAll(".link")
+                        .data(links)
+                        .enter().append("line")
+                        .attr("class", "link")
+                        .style("stroke", "rgb(153, 153, 153)")
+                        .style("stroke-opacity", 0.6)
+                        .style("stroke-width", di? 15 : 1)
+                        // 调用函数（绑定拖动行为）
+                        .call(force.drag);
+
+
+                    // 给d的links属性里面添加上link
+                    link.each(function(d) {
+                        d.source.links.push(d);
+                        // 对每个data绑定上select操作，之后在使用的时候就可以直接调用它的selection来看到select
+                        d.selection = d3.select(this);
+                    });
+                    // 设置半径为5，填充为灰色，调用force的drag
+                    node = svg.selectAll(".node")
+                        .data(nodes)
+                        .enter().append("circle")
+                        .attr("class", "node")
+                        .attr("r", function(d) { return di && d["links"].length ? 10 : 5; })
+                        .style("fill", function(d) { return color(d["score"]); })
+                        .style("stroke-width", 1.5)
+                        .style("stroke", "rgb(255, 255, 255)")
+                        // 调用函数（绑定拖动行为）
+                        .call(force.drag);
+
+                    node.each(function(d) {
+                        d.selection = d3.select(this);
+                    });
+
+                    // 给node和link赋给title
+                    node.append("title")
+                        .text(function(d) { return d.name; });
+
+                    link.append("title")
+                        .text(function(d) { return d.source.name + " → " + d.target.name + " : " + d.value; });
+                    
+                    // 把node和link进行文档和d3内容的绑定，绑定上位置坐标
+                    force.on("tick", function() {
+                        try{
+                        link.attr("x1", function(d) { return d.source.x; })
+                            .attr("y1", function(d) { return d.source.y; })
+                            .attr("x2", function(d) { return d.target.x; })
+                            .attr("y2", function(d) { return d.target.y; });
+
+                        node.attr("cx", function(d) { return d.x; })
+                            .attr("cy", function(d) { return d.y; });
+                        }
+                        finally{}
+                    });
+
+
+                    // 如果鼠标放上去之后的事件
+                    node.on("mouseover", function(d) {
+                        d3.select(this)
+                            .attr("r", function(d) { return di && d["links"].length ? 15 : 10; })
+                        
+                        d.links.forEach(function(l) {
+                            // 用到了之前的selection的定义
+                            l.selection
+                            .style("stroke-width", di ? 20 : 10)
+                            l.target.selection
+                            .attr("r", di ? 12 : 7);
+                        });
+
+                        d3.select("#text")
+                            .text("电影名：" + d["name"] + "\t评分：" + d["score"])
+                    });
+
+                    // 鼠标移开之后
+                    node.on("mouseout", function(d) {
+                        node.attr("r", function(d) { return di && d["links"].length ? 10 : 5; })
+                        link.style("stroke-width", di ? 15 : 1);
+
+                        d3.select("#text")
+                            .text("将鼠标放在点上显示具体信息")
+                    });
+
+                    link.on("mouseover", function(d) {
+                        d3.select(this)
+                            .style("stroke-width", di ? 25 : 10);
+
+                        d3.select("#text2")
+                            .text("边信息：" + d.source.name + " → " + d.target.name + " : " + d.value)
+                    });
+
+                    link.on("mouseout", function(d) {
+                        d3.select(this)
+                            .style("stroke-width", di ? 15 : 1);
+
+                        d3.select("#text2")
+                            .text("将鼠标放在边上显示具体信息")
+                    });
+
+                    var point1, point2;
+
+                    node.on("click", function(d){
+                        if(dijchoose) {
+                            if(chosenpointsnum != 1) {
+                                chosenpointsnum = 1;
+                                point1 = d["num"];
+                                d3.select("#info").text("请点击选取两个点来计算他们之间的最短道路，已选择1个点《" + d["name"] + "》");
+                            }
+                            else if(point1 != d["num"])
+                            {    
+                                chosenpointsnum = 2;
+                                point2 = d["num"];
+                                d3.select("#info").text("正在计算最短路径……");
+                                
+                                var pathlast = [],
+                                    visited = [],
+                                    minlen = [];
+                                for(var i = 0; i < pointsize; i++) {
+                                    pathlast.push(-1);
+                                    visited.push(false);
+                                    minlen.push(1000000);
+                                }
+
+                                minlen[point1] = 0;
+                                
+                                var readyCheck = [];
+                                readyCheck.push(point1);
+
+                                while(readyCheck.length){
+                                    var temp = readyCheck[0];
+                                    var tempi = 0;
+                                    for(var i = 1; i < readyCheck.length; i++) {
+                                        if(minlen[readyCheck[i]] < minlen[temp] || readyCheck[i] == point2 && minlen[readyCheck[i]] == minlen[temp]){
+                                            temp = readyCheck[i];
+                                            tempi = i;
+                                        }
+                                    }
+                                    for(var i = tempi; i < readyCheck.length - 1; i++) {
+                                        readyCheck[i] = readyCheck[i + 1];
+                                    }
+                                    readyCheck.pop();
+                                    visited[temp] = true;
+                                    console.log(temp);
+                                    if(temp == point2) {
+                                        break;
+                                    }
+                                    for (var p = 0; p < nodes[temp]["nexts"].length; p++) {
+                                        var check = nodes[temp]["nexts"][p]["node"];
+                                        if(!visited[check]) {
+                                            if(minlen[check] >= 1000000) {
+                                                readyCheck.push(check);
+                                            }
+                                            if(minlen[check] > minlen[temp] + graph[check][temp]) {
+                                                minlen[check] = minlen[temp] + graph[check][temp];
+                                                pathlast[check] = temp;
+                                            }
+                                        }
+                                    }
+                                }
+                                console.log("over")
+                                if(temp == point2) {
+                                    var str = "《" + nodes[point2]["name"] + "》";
+                                    var len = 0;
+                                    links.splice(0,links.length)
+                                    templink.splice(0,templink.length)
+                                    var temp = point2;
+                                    while(temp != point1) {
+                                        addlink(nodes[temp], nodes[pathlast[temp]], g[temp][pathlast[temp]]);
+                                        addlink(nodes[pathlast[temp]], nodes[temp], g[temp][pathlast[temp]]);
+                                        len += g[temp][pathlast[temp]];
+                                        temp = pathlast[temp];
+                                        str = "《" + nodes[temp]["name"] + "》 → " + str;
+                                    }
+                                    str = "路径为：" + str + "\t 总长度：" + len;
+                                    d3.select("#info").text(str);
+
+                                    links = templink;
+                                    svg.remove(force)
+
+                                    for(i = 0; i < pointsize; i++) {
+                                        nodes[i]["links"].splice(0,nodes[i]["links"].length);
+                                    }
+                                    paintnow(true);
+                                }
+                                else {
+                                    d3.select("#info").text("《" + nodes[point1]["name"] + "》与《" + nodes[point2]["name"] + "》之间不连通！");
+                                }
+                            }
+                        }
+                    })
+
+                }
+                
+                paintnow();
+                var dijk = d3.select("#dijkstra");
+                var prim = d3.select("#prim");
+
+                function addlink(src, tar, val)
+                {
+                    templink.push({"source": src, "target": tar, "value": val})
+                }
+
+                dijk.on("click", function(){
+
+                    dijchoose = true;
+                    chosenpointsnum = 0;
+                    d3.select("#info").text("请点击选取两个点来计算他们之间的最短道路，已选择0个点")
+
+                })
+
+                prim.on("click", function(){
+
+                    dijchoose = false;
+                    chosenpointsnum = 0;
+
+                    var linknum = 0;
+
+                    var i, j, last_pos, pos, min, result = 0;
+                    var minimum_spanning_tree = [], min_length = [], visited = [];
+                    for (i = 0; i < pointsize; i++)
+                    {
+                        minimum_spanning_tree.push(-1);
+                        min_length.push(1000000);
+                        visited.push(0);
+                    }
+                    //从某点开始，分别标记和记录该点
+                    visited[0] = 1;
+                    pos = 0;
+                    last_pos = 0;
+                    //第一次给min_length数组赋值
+                    for (i = 0; i < pointsize; i++)
+                    {
+                        if (i != pos)
+                        {
+                            min_length[i] = g[pos][i];
+                            if (min_length[i] != 1000000)
+                            {
+                                minimum_spanning_tree[i] = pos;
+                            }
+                        }
+                    }
+                    //再运行n-1次
+                    for (i = 1; i < pointsize; i++)
+                    {
+                        //找出最小权值并记录位置
+                        min = 1000000;
+                        for (j = 0; j < pointsize; j++)
+                        {
+                            if (visited[j] == 0 && min > min_length[j])
+                            {
+                                min = min_length[j];
+                                pos = j;
+                            }
+                        }
+                        //最小权值累加
+                        result += min;
+                        //标记该点
+                        visited[pos] = 1;
+                        //更新权值
+                        for (j = 0; j < pointsize; j++)
+                        {
+                            if (visited[j] == 0 && min_length[j] > g[pos][j])
+                            {
+                                min_length[j] = g[pos][j];
+                                if (min_length[j] != 1000000)
+                                {
+                                    minimum_spanning_tree[j] = pos;
+                                }
+                            }
+                        }
+                    }
+
+                    links.splice(0,links.length)
+                    templink.splice(0,templink.length)
+                    for(i = 0; i < pointsize; i++) {
+
+                        if(minimum_spanning_tree[i] >= 0) {
+                            addlink(nodes[i], nodes[minimum_spanning_tree[i]], g[i][minimum_spanning_tree[i]])
+                            addlink(nodes[minimum_spanning_tree[i]], nodes[i], g[i][minimum_spanning_tree[i]])
+                        }
+                        else {
+                            linknum++;
+                        }
+
+                    }
+
+                    links = templink;
+                    svg.remove(force)
+
+                    for(i = 0; i < pointsize; i++) {
+                        nodes[i]["links"].splice(0,nodes[i]["links"].length);
+                    }
+
+                    d3.select("#info").text("现在显示最小生成树！连通分支数为：" + linknum)
+
+                    paintnow();
+                });
+
+                var tb = d3.select("#tb");
+
+                tb.on("click", function(){
+
+                    dijchoose = false;
+                    chosenpointsnum = 0;
+
+                    var lastNode = [];
+                    var count = 0;
+                    for(i = 0; i < pointsize; i++) {
+                        lastNode.push(-1);
+                    }
+                    console.log(d3.select("#t")[0][0].value)
+                    var p = parseInt(d3.select("#t")[0][0].value);
+                    d3.select("#info").text("根据阈值" + p + "确定的连通分支正在计算……")
+
+                    if(p > 0) {
+                        if(p >= 40 || confirm("当阈值t小于40时，由于边数较多，可能会造成卡顿，是否确定按照给定阈值" + p + "进行计算？")) {
+                            links.splice(0,links.length)
+                            templink.splice(0,templink.length)
+
+                            for (i = 0; i < pointsize; i++) {
+                                for (j = i + 1; j < pointsize; j++) {
+                                    if(graph[i][j] > p) {
+                                        addlink(nodes[i], nodes[j], graph[i][j]);
+                                        if(lastNode[j] == -1) {
+                                            lastNode[j] = i;
+                                        }
+                                    }
+                                }
+                            }
+
+                            for(i = 0; i < pointsize; i++) {
+                                if(lastNode[i] == -1) {
+                                    count++;
+                                }
+                            }
+
+                            links = templink;
+                            svg.remove(force)
+
+                            for(i = 0; i < pointsize; i++) {
+                                nodes[i]["links"].splice(0,nodes[i]["links"].length);
+                            }
+
+                            d3.select("#info").text("现在显示根据t计算得到的连通分量！共计有" + count + "个联通分支！")
+
+                            paintnow();
+                        }
+                    }
+                    else {
+                        d3.select("#info").text("请输入合法的阈值t之后进行计算！")
+                    }
+
+                })
+            });
+
+
+        });
+
+
+    </script>
+</body>
+
+</html>
